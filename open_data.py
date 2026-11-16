@@ -1,41 +1,35 @@
 import sqlite3
 import json
+import sys
+import os
 
-learning_file_name = "learning2"
+learning_file_name = sys.argv[1] if len(sys.argv) > 1 else "learning_ai1"
+if learning_file_name.endswith(".db"):
+    learning_file_name = learning_file_name[:-3]
 
-def create_table():
-    # 데이터베이스에 테이블을 생성합니다. 테이블이 이미 존재하면 아무 작업도 하지 않습니다.
-    conn = sqlite3.connect(f'{learning_file_name}.db')
-    cursor = conn.cursor()
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS json_table (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        array_json TEXT
-    )
-    ''')
-    conn.commit()
-    conn.close()
+db_path = f"{learning_file_name}.db"
+if not os.path.exists(db_path):
+    print(f"DB 파일을 찾을 수 없습니다: {db_path}")
+    sys.exit(1)
 
-create_table()
+conn = sqlite3.connect(db_path)
+cursor = conn.cursor()
+tables = [row[0] for row in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]
 
-def load_data():
-    # 데이터베이스에서 배열 데이터를 불러와 리스트로 변환합니다.
-    conn = sqlite3.connect(f'{learning_file_name}.db')
-    cursor = conn.cursor()
-    cursor.execute('SELECT array_json FROM json_table')
+if "json_table" in tables:
+    cursor.execute("SELECT array_json FROM json_table")
     result = cursor.fetchone()
-    conn.close()
-    
-    if result:
-        return json.loads(result[0])
-    else:
-        return []
-    
+    data = json.loads(result[0]) if result else []
+    for level_idx, level_nodes in enumerate(data):
+        print(f"=== Level {level_idx} ({len(level_nodes)} nodes) ===")
+        for node in level_nodes:
+            print(node)
+elif "tree" in tables:
+    rows = cursor.execute("SELECT level, board, drop_row, drop_col, reward FROM tree").fetchall()
+    print(f"=== tree ({len(rows)} rows) ===")
+    for row in rows:
+        print(row)
+else:
+    print(f"지원하는 테이블이 없습니다. (현재 테이블: {tables})")
 
-
-for i in load_data():
-    print()
-    for j in i:
-        print(j)
-
-input()
+conn.close()

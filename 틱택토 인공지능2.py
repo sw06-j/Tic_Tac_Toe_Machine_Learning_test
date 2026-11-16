@@ -1,7 +1,6 @@
 import tkinter as tk
 import sqlite3
-#import json
-import copy
+import json
 import random
 
 f_learning_name = "learning_f"
@@ -14,52 +13,54 @@ def create_table(file_name):
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS tree (
         level INT NOT NULL,
-        board VARCHAR(20) NOT NULL,
+        board TEXT NOT NULL,
         drop_row INT,
         drop_col INT,
         reward INT DEFAULT 0
     )
     ''')
-    
     conn.commit()
     conn.close()
 
-def save_data(level,board,drop_pos,reward,file_name):
+def save_data(level, board_str, drop_row, drop_col, reward, file_name):
     conn = sqlite3.connect(f'{file_name}.db')
     cursor = conn.cursor()
-    cursor.execute("INSERT INTO tree (level, board, drop_pos, reward) VALUES (?, ?, ?, ?)",
-                   (level, board, drop_pos, reward))
+    cursor.execute(
+        "INSERT INTO tree (level, board, drop_row, drop_col, reward) VALUES (?, ?, ?, ?, ?)",
+        (level, board_str, drop_row, drop_col, reward)
+    )
     conn.commit()
     conn.close()
 
-def load_all(file_name):
-    # 데이터베이스에서 배열 데이터를 불러와 리스트로 변환합니다.
+def get_moves_for_board(board_str, file_name):
     conn = sqlite3.connect(f'{file_name}.db')
     cursor = conn.cursor()
-    cursor.execute(f'''SELECT * FROM tree''')
+    cursor.execute(
+        "SELECT drop_row, drop_col, reward FROM tree WHERE board = ? ORDER BY reward DESC",
+        (board_str,)
+    )
     result = cursor.fetchall()
     conn.close()
     return result
 
-def load_free(command,all,file_name):
-    # 데이터베이스에서 배열 데이터를 불러와 리스트로 변환합니다.
+def update_or_insert_reward(level, board_str, drop_row, drop_col, reward, file_name):
     conn = sqlite3.connect(f'{file_name}.db')
     cursor = conn.cursor()
-    cursor.execute(command)
-    if all==1:
-        result = cursor.fetchall()
-    elif all==2:
-        pass
+    cursor.execute(
+        "SELECT reward FROM tree WHERE board = ? AND drop_row = ? AND drop_col = ?",
+        (board_str, drop_row, drop_col)
+    )
+    existing = cursor.fetchone()
+    if existing is None:
+        cursor.execute(
+            "INSERT INTO tree (level, board, drop_row, drop_col, reward) VALUES (?, ?, ?, ?, ?)",
+            (level, board_str, drop_row, drop_col, reward)
+        )
     else:
-        result = cursor.fetchone()
-    
-    conn.close()
-    return result
-
-def delete(board, drop_pos, file_name):
-    conn = sqlite3.connect(f'{file_name}.db')
-    cursor = conn.cursor()
-    cursor.execute("DELETE FROM tree WHERE board = ? AND drop_pos = ?", (board, drop_pos))
+        cursor.execute(
+            "UPDATE tree SET reward = reward + ? WHERE board = ? AND drop_row = ? AND drop_col = ?",
+            (reward, board_str, drop_row, drop_col)
+        )
     conn.commit()
     conn.close()
 
@@ -107,34 +108,32 @@ temp_save_f=[]
 temp_save_s=[]
 
 #================================================================
-def f_ai_backpropagation(reward):# 역전파
+def f_ai_backpropagation(reward):  # 역전파
     global temp_save_f
-    for i in temp_save_f:
-        if 0 == len(load_free(f"SELECT * FROM tree WHERE board='{i[1]}' AND drop_row = {i[2]} AND drop_col = {i[3]}",1,f_learning_name)): # 존재하지 않으면
-            save_data(i[0],i[1],i[2],i[3],[4]+reward)
-        else: # 존재하면
-            load_free(f"UPDATE tree SET reward = reward + ({reward}) WHERE board = '{i[1]}' AND drop_row = {i[2]} AND drop_col = {i[3]}",2,f_learning_name)
-            
+    for level, board_str, drop_row, drop_col in temp_save_f:
+        update_or_insert_reward(level, board_str, drop_row, drop_col, reward, f_learning_name)
     temp_save_f = []
 
 def f_ai_drow():
     global tree_level, board, temp_save_f
-    #print(load_free(f"SELECT * FROM tree WHERE board='{str(board)}'",1,f_learning_name))
+    board_str = json.dumps(board)
+    empty_cells = [(i, j) for i in range(3) for j in range(3) if board[i][j] == ' ']
 
-    if tree_level != len(load_free(f"SELECT * FROM tree WHERE board='{str(board)}'",1,f_learning_name)) and 0 < int((load_free(f'''SELECT reward FROM tree WHERE board='{str(board)}' ORDER BY reward''',0,f_learning_name))[0]):
-        ran_list = []
-        for i in range(9):
-            for j in range(9):
-                if board[i][j] == ' ':
-                    ran_list.append((i,j))
-        drop = random.shuffle(ran_list)
-        temp_save_f.append([tree_level, board, drop[0], drop[1], 0])
+    known_moves = get_moves_for_board(board_str, f_learning_name)
+    known_coords = {(r, c) for r, c, _ in known_moves}
+    unexplored = [cell for cell in empty_cells if cell not in known_coords]
+
+    # 아직 탐색하지 않은 수가 있거나 최고 보상 수가 양수가 아니면 탐색
+    best_known = next(((r, c, rew) for r, c, rew in known_moves if (r, c) in empty_cells), None)
+    if unexplored and (best_known is None or best_known[2] <= 0):
+        drop = random.choice(unexplored)
+    elif best_known is not None:
+        drop = (best_known[0], best_known[1])
     else:
-        drop = load_free(((f'''SELECT drop_row, drop_col FROM tree WHERE board='{str(board)}' ORDER BY reward'''),1,f_learning_name)[0])
-        temp_save_f.append([tree_level, board, drop[0], drop[1], 0])
+        drop = random.choice(empty_cells)
+
+    temp_save_f.append((tree_level, board_str, drop[0], drop[1]))
     return drop
-    
-    
 #================================================================
 def s_ai_backpropagation():# 역전파
     pass
@@ -147,43 +146,45 @@ turn = -1
 f_reward = 0
 s_reward = 0
 
+def finish_if_game_over():
+    global turn, tree_level, f_reward
+    winner = check_winner()
+    if not winner:
+        return False
+
+    if winner == 'X':
+        score[0] += 1
+        f_reward = -1
+    elif winner == 'O':
+        score[1] += 1
+        f_reward = 1
+    else:
+        score[2] += 1
+        f_reward = 0
+
+    f_ai_backpropagation(f_reward)
+    turn = -1
+    tree_level = 0
+    reset_game()
+    return True
+
 def put(row, col):
-    global score, reset, tree_level, nodes, rewerd, turn, board, f_reward, s_reward
+    global tree_level, board
+    if board[row][col] != ' ':
+        return
+
     tree_level += 1
-
-    # 수 두기
-    '''
-    if turn == -1:
-        board[row][col] = 'X'
-    elif turn == 1:
-       board[row][col] = 'O'
-    turn *= -1
-    '''
-
     board[row][col] = 'X'
-
-    ai_drow = f_ai_drow()#========여기
-    board[ai_drow[0]][ai_drow[1]] = 'O'
-
     update_board()
 
-    # 종료
-    if check_winner(): 
-        # 승자 점수 부여
-        if check_winner()=='X':
-            score[0] += 1
-            f_rewerd = -1
-        elif check_winner()=='O':
-            score[1] += 1
-            f_rewerd = 1
-        else:
-            score[2] += 1
-            f_rewerd = 0
-        f_ai_backpropagation(f_reward)
-        
-        turn = -1
-        tree_level = 0
-        reset_game()
+    if finish_if_game_over():
+        return
+
+    ai_drow = f_ai_drow()
+    board[ai_drow[0]][ai_drow[1]] = 'O'
+    update_board()
+
+    finish_if_game_over()
 
 
 

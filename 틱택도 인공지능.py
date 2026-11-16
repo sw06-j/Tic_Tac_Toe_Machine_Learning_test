@@ -49,13 +49,13 @@ def delete_all_data(file_name):
 create_table(learning_file_name1)
 create_table(learning_file_name2)
 
-if len(load_data(learning_file_name1)) != 5:
+if len(load_data(learning_file_name1)) != 9:
     delete_all_data(learning_file_name1)
-    save_data([[],[],[],[],[],[]], learning_file_name1)
+    save_data([[] for _ in range(9)], learning_file_name1)
 
-if len(load_data(learning_file_name2)) != 5:
+if len(load_data(learning_file_name2)) != 9:
     delete_all_data(learning_file_name2)
-    save_data([[],[],[],[],[],[]], learning_file_name2)
+    save_data([[] for _ in range(9)], learning_file_name2)
 
 board = [[' ', ' ', ' '], [' ', ' ', ' '], [' ', ' ', ' ']]
 
@@ -80,18 +80,41 @@ def check_draw():
     return True
 
 tree_level = -1
-reset = 0
-nodes = []
+nodes_x = []
+nodes_o = []
+
+def update_ai_data(file_name, ai_nodes, reward):
+    data = load_data(file_name)
+    while len(data) < 9:
+        data.append([])
+    for node in ai_nodes:
+        lvl = node[0]
+        add_node = True
+        for existing in data[lvl]:
+            if existing[1] == node[1]:
+                existing[4] += reward
+                if node[2][0] not in existing[2]:
+                    existing[2].append(node[2][0])
+                add_node = False
+                break
+        if add_node:
+            node[4] += reward
+            data[lvl].append(node)
+    delete_all_data(file_name)
+    save_data(data, file_name)
 
 def ai_move(player, file_name):
-    global tree_level, reset, nodes
+    global tree_level, nodes_x, nodes_o
     data = load_data(file_name)
     tree_level += 1
     before_board = copy.deepcopy(board)
-    if player == 'X':
-        mark = 'X'
-    else:
-        mark = 'O'
+    mark = 'X' if player == 'X' else 'O'
+
+    void_list = []
+    for x in range(3):
+        for y in range(3):
+            if board[x][y] == ' ':
+                void_list.append([x, y])
 
     if tree_level < 4:
         drow_list = []
@@ -100,84 +123,64 @@ def ai_move(player, file_name):
                 if before_board in i[2]:
                     drow_list.append(i)
 
-        void_list = []
-        for x in range(3):
-            for y in range(3):
-                if board[x][y] == ' ':
-                    void_list.append([x, y])
-
         if len(drow_list) < len(void_list):
+            row, col = random.choice(void_list)
             for position in void_list:
                 potential_board = copy.deepcopy(board)
                 potential_board[position[0]][position[1]] = mark
                 if potential_board not in [node[1] for node in drow_list]:
                     row, col = position
                     break
-                print("탐색")
         else:
             select_drow = max(drow_list, key=lambda x: x[4])
             row = select_drow[3][0]
             col = select_drow[3][1]
-            print("경험")
     else:
-        void_list = []
-        for x in range(3):
-            for y in range(3):
-                if board[x][y] == ' ':
-                    void_list.append([x, y])
         row, col = random.choice(void_list)
 
     board[row][col] = mark
     winner = check_winner()
 
-    nodes.append([tree_level, copy.deepcopy(board), [before_board], [row, col], 0, winner])
-    
+    node = [tree_level, copy.deepcopy(board), [before_board], [row, col], 0, winner]
+    if mark == 'X':
+        nodes_x.append(node)
+    else:
+        nodes_o.append(node)
+
     update_board()
 
     if winner:
         if winner == 'X':
             score[0] += 1
-            reward = -(5 - tree_level)  # 벌
+            reward_x = 5
+            reward_o = -(5 - tree_level // 2)
         else:
             score[1] += 1
-            reward = 5  # 보상
-        reset = 1
+            reward_x = -(5 - tree_level // 2)
+            reward_o = 5
+        update_ai_data(learning_file_name1, nodes_x, reward_x)
+        update_ai_data(learning_file_name2, nodes_o, reward_o)
+        nodes_x = []
+        nodes_o = []
+        reset_game()
+        return True
     elif check_draw():
         score[2] += 1
-        reset = 1
-        reward = 3  # 무승부 보상
-
-    if reset == 1:
-        tree_level = -1
-        reset = 0
-        for i in range(len(nodes)):
-            add_node = 1
-            if i < len(data):
-                for j in range(len(data[i])):
-                    if data[i][j][1] == nodes[i][1]:
-                        data[i][j][4] += reward
-                        if nodes[i][2] not in data[i][j][2]:
-                            data[i][j][2].append(nodes[i][2])
-                        add_node = 0
-                        break
-            if add_node == 1:
-                nodes[i][4] += reward
-                if i >= len(data):
-                    data.append([])
-                data[i].append(nodes[i])
-        nodes = []
-
-        delete_all_data(file_name)
-        save_data(data, file_name)
-
+        update_ai_data(learning_file_name1, nodes_x, 3)
+        update_ai_data(learning_file_name2, nodes_o, 3)
+        nodes_x = []
+        nodes_o = []
         reset_game()
+        return True
+
+    return False
 
 def play_game():
-    global reset
-    if not reset:
-        ai_move('X', learning_file_name1)
-    if not reset:
-        ai_move('O', learning_file_name2)
+    while True:
+        if ai_move('X', learning_file_name1):
+            break
+        if ai_move('O', learning_file_name2):
+            break
 
 def reset_game():
     global score, tree_level

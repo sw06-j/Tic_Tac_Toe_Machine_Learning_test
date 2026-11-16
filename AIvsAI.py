@@ -1,40 +1,12 @@
 import os
 import random
-import datetime, time
+import time
+import cv2
+import torch
+from PIL import Image, ImageTk
+import tkinter as tk
+from tkinter import messagebox
 from playsound import playsound
-
-stop = 0
-for i in range(5):
-    try:
-        try:
-            import cv2
-            import torch
-            from PIL import Image
-            import tkinter as tk
-            from tkinter import messagebox
-            from PIL import ImageTk
-            stop = 1
-        except:
-            os.system("git clone https://github.com/ultralytics/yolov5.git")
-            os.system("cd yolov5")
-            os.system("pip install -r requirements.txt")
-            os.system("pip install pandas")
-            os.system("pip install pustil")
-            os.system("pip install torchvision")
-            os.system("pip install pyyaml")
-            os.system("pip install tpdm")
-            os.system("pip install ultralytics")
-            os.system("pip install opencv-python")
-            os.system("pip3 install torch")
-            os.system("pip install pillow")
-            os.system("pip install tkinter")
-            os.system("pip install tk ")
-    except:
-        print("retry")
-    if stop == 1:
-        break
-
-os.system("git clone https://github.com/ultralytics/yolov5.git")
 
 ver = 4.0
 
@@ -178,6 +150,9 @@ def update_frame():
 
     # 영상 프레임 읽기
     ret, frame = cap.read()
+    if not ret or frame is None:
+        window.after(10, update_frame)
+        return
     
     flipped_frame = cv2.flip(frame, 1) # 좌우 반전
 
@@ -229,10 +204,15 @@ def update_frame():
 
         x1, y1, x2, y2 = bbox[:4].astype(int)
 
-        sound_size = int(100/((abs(x1-x2)*abs(y1-y2))/30)) 
-        playsound(audio_file)
+        area = max(abs(x1 - x2) * abs(y1 - y2), 1)
+        sound_size = min(max(int(100 / (area / 30)), 0), 100)
+        try:
+            playsound(audio_file, block=False)
+        except Exception:
+            pass
 
-        os.system(f"amixer set Master {sound_size}%")
+        if os.name == "posix":
+            os.system(f"amixer set Master {sound_size}%")
 
         # 경계 상자 그리기
         if boxing == 1:
@@ -240,7 +220,7 @@ def update_frame():
 
         # 클래스 이름과 신뢰도 표시
         if texting == 1:
-            acc = f": {abs(x1-x2)*abs(y1=y2)}"
+            acc = f": {confidence:.2f}"
             if accuracy == 1:
                 acc = ''
             label = f'{class_name}{acc}'
@@ -265,7 +245,7 @@ def update_frame():
 
     end_time = time.time()
 
-    elapsed_time = end_time - start_time
+    elapsed_time = max(end_time - start_time, 1e-6)
 
     fps_text["text"] = f"FPS:({int(1/elapsed_time)+1})"
 
